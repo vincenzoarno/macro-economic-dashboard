@@ -1,0 +1,7 @@
+venv/
+__pychache__/
+*.pkl
+*.pyc
+data/
+output/
+.env
