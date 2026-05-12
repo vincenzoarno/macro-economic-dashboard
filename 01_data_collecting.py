@@ -3,8 +3,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import yfinance as yf
 from fredapi import Fred
-APIKEY="a29ccdbf1e2b7d4d54759828f3cd46cc"
-fred = Fred(api_key=APIKEY)
+import os 
+from dotenv import load_dotenv
+load_dotenv()
+API_KEY= os.getenv("FRED_API_KEY")
+fred = Fred(api_key=API_KEY)
 INDICATORI= {
     # INFLAZIONE
     "inflazione eurozona": "CP0000EZ19M086NEST",
