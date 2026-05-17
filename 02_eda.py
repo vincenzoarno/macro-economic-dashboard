@@ -1,204 +1,193 @@
-import numpy as np
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
-# Aprire e ispezionare i dati
-def pulisci_serie(df):
-    for col,value in df.items():
-        if value.isna().sum() < len(value) * 0.05:
-            df= df.dropna(subset=col)
-        else: 
-            df[col]=value.fillna(value.median())
-        df[col]= df[col].round(2)        
-    
-    df= df[~df.index.duplicated(keep="last")]
-    return df
 
-def importa_serie(percorso):
-    nome= percorso.split("/")[-1].split(".")[0]
-    df= pd.read_csv(percorso, index_col=0, parse_dates=True)
-    df.columns= [nome]
-    df.index.name= "date"
-    return df
+from utils import carica_dati, carica_mercati, plot_timeseries
 
-dati= {}
-for file in os.listdir("data/raw/macro"):
-    dati[file.split(".")[0]]= importa_serie(f"data/raw/macro/{file}")
+# ---------------------------------------------------------------------------
+# Configurazione
+# ---------------------------------------------------------------------------
 
-for key, value in dati.items():
-    dati[key]= pulisci_serie(value)
-
-for nome, df in dati.items():
-    df.to_csv(f"data/clean/macro/{nome}.csv")
-    print(f"Salvato: {nome}")
-
-def pulisci_mercati(df):
-    for col,value in df.items():
-        if value.isna().sum() < len(value) * 0.05:
-            df= df.dropna(subset=col)
-        else: 
-            df[col]=value.fillna(value.median())
-        df[col]= df[col].round(2)        
-    if df.index.tz is not None:
-        df.index = df.index.tz_convert(None)
-    df= df[~df.index.duplicated(keep="last")]
-    df= df.squeeze()
-    return df
-
-dati2= {}
-
-for file in os.listdir("data/raw/mercati"):
-    dati2[file.split(".")[0]]= importa_serie(f"data/raw/mercati/{file}")
-
-for key,value in dati2.items():
-    dati2[key]= pulisci_mercati(value)
-
-for nome,df in dati2.items():
-    df.to_csv(f"data/clean/mercati/{nome}.csv")
-    print(f"Salvato: {nome}")
-
-# APPLICHIAMO STATISTICHE DESCRITTIVE
-for nome,df in dati.items():
-    print(f"\n{nome}:")
-    print(df.describe())
-    
-# VISUALIZZIAMO
 plt.style.use("seaborn-v0_8")
-def aggiungi_crisi(ax):
-    ax.axvspan("2009-01-01", "2009-12-31", alpha=0.2, color="orange", label="Grande recessione")
-    ax.axvspan("2011-01-01", "2013-12-31", alpha=0.2, color="red",label="Crisi debito sovrano")
-    ax.axvspan("2020-01-01", "2021-12-31", alpha=0.2, color="purple", label="Pandemia")
-    ax.axvspan("2022-02-01", "2023-12-31", alpha=0.2, color="blue",label="Crisi energetica")
-    ax.axvline(pd.Timestamp("2012-07-26"),color="black", linestyle="--", linewidth=1)
-    ax.annotate("Whatever it takes", xy=(pd.Timestamp("2012-07-26"), 11),
-            xytext=(pd.Timestamp("2013-06-01"), 11.5),
-            arrowprops={"arrowstyle": "->", "color": "black"},
-            fontsize=8)
-def plot_timeseries(ax, x, y, color, xlabel, ylabel,title):
-    ax.plot(x, y, color=color)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel, color=color)
-    ax.set_title(title)
-    ax.tick_params("y", colors=color)
-    aggiungi_crisi(ax)
-    ax.legend(loc='upper right', bbox_to_anchor=(1.25,1))
-    plt.xticks(rotation=45)
-    ax.grid(alpha=0.3)
+os.makedirs("output/grafici", exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Funzione di supporto: salva figura
+# ---------------------------------------------------------------------------
+
+def salva_figura(fig: plt.Figure, titolo: str) -> None:
+    """
+    Salva la figura in output/grafici/.
+    Separare il salvataggio dalla costruzione del grafico permette
+    a plot_timeseries di restare generica (non sa nulla di file system).
+
+    Il nome del file viene sanitizzato: caratteri illegali su Windows
+    (/ \\ : * ? " < > |) vengono sostituiti con underscore.
+    Il titolo del grafico resta invariato — la sanitizzazione riguarda
+    solo il percorso su disco.
+    """
+    nome_file = titolo
+    for char in r'/\:*?"<>|':
+        nome_file = nome_file.replace(char, "_")
+    percorso = f"output/grafici/{nome_file}.png"
+    fig.savefig(percorso, dpi=300, bbox_inches="tight")
+    print(f"  Salvato: {percorso}")
+
+
+# ---------------------------------------------------------------------------
+# Funzione: grafico singola serie con salvataggio
+# ---------------------------------------------------------------------------
+
+def grafico_serie(
+    dati: dict,
+    chiave: str,
+    color: str,
+    ylabel: str,
+    titolo: str,
+) -> None:
+    """
+    Crea, mostra e salva il grafico di una singola serie dal dizionario dati.
+    Centralizza la logica ripetuta nei ~12 plot_timeseries del file originale.
+    """
+    if chiave not in dati:
+        print(f"  [ATTENZIONE] Serie '{chiave}' non trovata — saltata.")
+        return
+
+    df = dati[chiave]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plot_timeseries(
+        ax=ax,
+        x=df.index,
+        y=df.squeeze().values,
+        color=color,
+        xlabel="date",
+        ylabel=ylabel,
+        title=titolo,
+    )
     plt.tight_layout()
-    fig.savefig(f"output/grafici/{title}.png", dpi=300, bbox_inches="tight")
-
-disoccupazione_eurozona= dati["disoccupazione_eurozona"]
-disoccupazione_italia= dati["disoccupazione_italia"]
-inflazione_eurozona=dati["inflazione eurozona"]
-inflazione_italia= dati["inflazione italia"]
-m3_eurozona= dati["m3_eurozona"]
-pil_eurozona= dati["pil eurozona"]
-pil_italia= dati["pil_italia"]
-tasso_bce= dati["tasso_bce"]
-
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, disoccupazione_eurozona.index, disoccupazione_eurozona.values,
-                color="#C0392B", xlabel="date", ylabel="disoccupazione eurozona(%)",
-                 title="Percentuale di disoccupazione eurozona")
+    salva_figura(fig, titolo)
+    plt.close(fig)   # libera memoria — importante quando si generano molti grafici
 
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, disoccupazione_italia.index, disoccupazione_italia.values,
-                color="#C0392B", xlabel="date", ylabel="disoccupazione italia(%)",
-                 title="Percentuale di disoccupazione italia")
+# ---------------------------------------------------------------------------
+# Caricamento dati
+# ---------------------------------------------------------------------------
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, inflazione_eurozona.index, inflazione_eurozona.values,
-                color="#E67E22", xlabel="date", ylabel="inflazione eurozona(CPI)",
-                 title="consumer price index europeo")
+print("Caricamento dati macro...")
+dati = carica_dati()
 
+print("Caricamento dati mercati...")
+mercati = carica_mercati()
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, inflazione_italia.index, inflazione_italia.values,
-                color="#E67E22", xlabel="date", ylabel="inflazione italia(CPI)",
-                 title="consumer price index italiano")
+# ---------------------------------------------------------------------------
+# Statistiche descrittive
+# ---------------------------------------------------------------------------
 
+print("\n" + "=" * 50)
+print("STATISTICHE DESCRITTIVE — MACRO")
+print("=" * 50)
+for nome, df in dati.items():
+    print(f"\n{nome}:")
+    print(df.describe().round(2))
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, inflazione_eurozona.index, inflazione_eurozona.values,
-                color="#E67E22", xlabel="date", ylabel="inflazione eurozona(CPI)",
-                 title="consumer price index europeo")
+# ---------------------------------------------------------------------------
+# Grafici serie macro
+# ---------------------------------------------------------------------------
 
+print("\n" + "=" * 50)
+print("GRAFICI SERIE MACRO")
+print("=" * 50)
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, m3_eurozona.index, m3_eurozona.values,
-                color="#27AE60", xlabel="date", ylabel="m3 eurozona",
-                 title="massa monetaria m3 europea(Euro (€))")
+GRAFICI_MACRO = [
+    ("disoccupazione_eurozona", "#C0392B", "Disoccupazione (%)",      "Percentuale di disoccupazione eurozona"),
+    ("disoccupazione_italia",   "#C0392B", "Disoccupazione (%)",      "Percentuale di disoccupazione italia"),
+    ("inflazione_eurozona",     "#E67E22", "Inflazione (HICP)",       "Consumer Price Index europeo"),
+    ("inflazione_italia",       "#E67E22", "Inflazione (HICP)",       "Consumer Price Index italiano"),
+    ("m3_eurozona",             "#27AE60", "M3 (milioni €)",          "Massa monetaria M3 europea"),
+    ("pil_italia",              "#2980B9", "PIL (milioni €)",         "PIL italia (milioni di Euro)"),
+    ("pil_eurozona",            "#2980B9", "PIL (milioni €)",         "PIL eurozona (milioni di Euro)"),
+    ("tasso_bce",               "#8E44AD", "Tasso BCE (%)",           "Tassi di interesse BCE"),
+    ("btp_10y",                 "#E74C3C", "Rendimento (%)",          "Rendimento BTP italiano a 10 anni"),
+    ("bund_10y",                "#F39C12", "Rendimento (%)",          "Rendimento Bund tedesco a 10 anni"),
+]
 
+for chiave, colore, ylabel, titolo in GRAFICI_MACRO:
+    # BTP e Bund sono in dati (macro), non in mercati
+    sorgente = dati if chiave in dati else mercati
+    grafico_serie(sorgente, chiave, colore, ylabel, titolo)
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, pil_italia.index, pil_italia.values,
-                color="#2980B9", xlabel="date", ylabel="pil ",
-                 title="pil italia(miliardi di Euro (€))")
+# ---------------------------------------------------------------------------
+# Grafici serie mercati
+# ---------------------------------------------------------------------------
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, pil_eurozona.index, pil_eurozona.values,
-                color="#2980B9", xlabel="date", ylabel="pil",
-                 title="pil eurozona(miliardi di Euro (€))")
+print("\n" + "=" * 50)
+print("GRAFICI SERIE MERCATI")
+print("=" * 50)
 
+GRAFICI_MERCATI = [
+    ("eurostoxx50", "#2980B9", "Indice",     "Indice azionario eurozona (EuroStoxx 50)"),
+    ("eurusd",      "#27AE60", "EUR/USD",    "Tasso di cambio EUR/USD"),
+    ("ftse_mib",    "#2C3E50", "Indice",     "Indice azionario italiano (FTSE MIB)"),
+    ("brent",       "#E67E22", "USD/barile", "Brent Crude Oil (USD/barile)"),
+    ("vix",         "#8E44AD", "Indice",     "VIX — Indice di volatilità globale"),
+]
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, tasso_bce.index, tasso_bce.values,
-                color="#8E44AD", xlabel="date", ylabel="tassi bce",
-                 title="tassi di interesse BCE (%)")
+for chiave, colore, ylabel, titolo in GRAFICI_MERCATI:
+    grafico_serie(mercati, chiave, colore, ylabel, titolo)
 
-pil_italia_mensile= dati["pil_italia"].resample("MS").ffill()
-pil_europa_mensile= dati["pil eurozona"].resample("MS").ffill()
-tasso_bce_mensile= dati["tasso_bce"].resample("MS").last()
+# ---------------------------------------------------------------------------
+# Heatmap correlazione macro + mercati
+# ---------------------------------------------------------------------------
 
+print("\n" + "=" * 50)
+print("HEATMAP CORRELAZIONE MACRO + MERCATI")
+print("=" * 50)
 
-btp_10y= dati2["btp_10y"]
-bund_10y= dati2["bund_10y"]
-eurostoxx50= dati2["eurostoxx50"]
-eurusd= dati2["eurusd"]
-ftse_mib= dati2["ftse_mib"]
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, btp_10y.index, btp_10y.values,
-                color="#E74C3C", xlabel="date", ylabel="btp 10y",
-                 title="Rendimento BTP italiano a 10 anni (%)")
+# Ricampiona tutto a frequenza mensile per poter fare il concat
+def a_mensile(df: pd.DataFrame) -> pd.Series:
+    return df.squeeze().resample("MS").last()
 
+serie_macro = {
+    "disoccupazione_eurozona": a_mensile(dati["disoccupazione_eurozona"]) if "disoccupazione_eurozona" in dati else None,
+    "disoccupazione_italia":   a_mensile(dati["disoccupazione_italia"]),
+    "inflazione_eurozona":     a_mensile(dati["inflazione_eurozona"]),
+    "inflazione_italia":       a_mensile(dati["inflazione_italia"]),
+    "m3_eurozona":             a_mensile(dati["m3_eurozona"]),
+    "pil_italia":              dati["pil_italia"].squeeze().resample("MS").ffill(),
+    "pil_eurozona":            dati["pil_eurozona"].squeeze().resample("MS").ffill(),
+    "tasso_bce":               dati["tasso_bce"].squeeze().resample("MS").last(),
+    "btp_10y":                 a_mensile(dati["btp_10y"]),
+    "bund_10y":                a_mensile(dati["bund_10y"]),
+}
+# Rimuove serie None (disoccupazione_eurozona se non scaricata)
+serie_macro = {k: v for k, v in serie_macro.items() if v is not None}
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, bund_10y.index, bund_10y.values,
-                color="#F39C12", xlabel="date", ylabel="bund 10y",
-                 title="Rendimento Bund tedesco a 10 anni (%)")
+serie_mercati = {
+    "eurostoxx50": a_mensile(mercati["eurostoxx50"]),
+    "eurusd":      a_mensile(mercati["eurusd"]),
+    "ftse_mib":    a_mensile(mercati["ftse_mib"]),
+    "brent":       a_mensile(mercati["brent"]),
+    "vix":         a_mensile(mercati["vix"]),
+}
 
+df_combinato = pd.DataFrame({**serie_macro, **serie_mercati})
+matrice_corr = df_combinato.corr()
 
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, eurostoxx50.index, eurostoxx50.values,
-                color="#2980B9", xlabel="date", ylabel="eurostoxx50",
-                 title="Indice azionario eurozona (EuroStoxx 50)")
-
-
-fig,ax= plt.subplots(figsize=(10,5))
-
-plot_timeseries(ax, eurusd.index, eurusd.values,
-                color="#27AE60", xlabel="date", ylabel="eurusd",
-                 title="Tasso di cambio EURUSD")
-
-fig,ax= plt.subplots(figsize=(10,5))
-plot_timeseries(ax, ftse_mib.index, ftse_mib.values,
-                color="#2C3E50", xlabel="date", ylabel="ftsemib",
-                 title="Indice azionario italiano (FTSE MIB)")
-
-
-btp_10y_mon=dati2["btp_10y"].resample("MS").last()
-bund_10y_mon=dati2["bund_10y"].resample("MS").last()
-eurostoxx50mon=dati2["eurostoxx50"].resample("MS").last()
-eurusdmon=dati2["eurusd"].resample("MS").last()
-ftse_mib_mon=dati2["ftse_mib"].resample("MS").last()
-df_macro_mercati= pd.concat([disoccupazione_eurozona, disoccupazione_italia, inflazione_eurozona, inflazione_italia, m3_eurozona, pil_italia_mensile, pil_europa_mensile, tasso_bce_mensile,
-                     btp_10y_mon,bund_10y_mon,eurostoxx50mon,eurusdmon,ftse_mib_mon], axis=1)
-matrice_correlazione= df_macro_mercati.corr()
-fig,ax= plt.subplots(figsize=(10,8))
-heatmap_macros= sns.heatmap(matrice_correlazione,cmap="coolwarm", annot=True, cbar=True, fmt=".2f", ax=ax)
+fig, ax = plt.subplots(figsize=(12, 9))
+sns.heatmap(
+    matrice_corr,
+    cmap="coolwarm",
+    annot=True,
+    fmt=".2f",
+    cbar=True,
+    ax=ax,
+)
 ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
 ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 plt.tight_layout()
-fig.savefig(f"output/grafici/heatmap macros and market.png", dpi=300, bbox_inches="tight")
+salva_figura(fig, "heatmap_macro_mercati")
+plt.close(fig)
+
+print("\nEDA completata.")

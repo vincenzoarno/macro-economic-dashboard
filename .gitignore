@@ -1,8 +1,36 @@
+# Ambiente
 venv/
-__pychache__/
-*.pkl
-*.pyc
-data/
-output/
-models/
 .env
+
+# Dati — scaricati da 01_data_collecting.py
+data/
+
+# Modelli — generati da 03, 04, 05
+models/
+
+# Output grafici — generati da 02, 03, 04, 05
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Eccezioni — file models necessari per il deploy Streamlit
+!models/gb_inflazione.pkl
+!models/gb_spread.pkl
+!models/scaler.pkl
+!models/feature_matrix.csv
+!models/granger_matrix.csv
+!models/taylor_rule.csv
