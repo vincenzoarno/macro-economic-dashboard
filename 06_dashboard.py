@@ -1,3 +1,4 @@
+import os
 import joblib
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -106,6 +107,85 @@ mpl.rcParams.update({
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
+
+def _scarica_se_necessario():
+    """
+    Se data/clean/ non esiste (es. Streamlit Cloud), scarica i dati
+    direttamente da FRED e yFinance prima di caricarli.
+    Usa la FRED_API_KEY dai Secrets di Streamlit o dal file .env locale.
+    """
+    if not os.path.isdir("data/clean/macro"):
+        st.info("⏳ Prima esecuzione: scaricamento dati in corso (1-2 minuti)...")
+        import sys
+        sys.path.insert(0, ".")
+        from fredapi import Fred
+        import yfinance as yf
+        from utils import pulisci_dizionario, resample_dati as _resample
+
+        api_key = os.getenv("FRED_API_KEY")
+        if not api_key:
+            st.error("FRED_API_KEY non trovata. Aggiungila nei Secrets di Streamlit.")
+            st.stop()
+
+        fred = Fred(api_key=api_key)
+
+        INDICATORI = {
+            "inflazione_eurozona": "CP0000EZ19M086NEST",
+            "inflazione_italia":   "CP0000ITM086NEST",
+            "pil_eurozona":        "CLVMEURSCAB1GQEA19",
+            "pil_italia":          "CLVMNACSCAB1GQIT",
+            "disoccupazione_eurozona": "LRHUTTTTEZM156S",
+            "disoccupazione_italia":   "LRHUTTTTITM156S",
+            "tasso_bce":           "ECBDFR",
+            "m3_eurozona":         "MABMM301EZM189S",
+            "btp_10y":             "IRLTLT01ITM156N",
+            "bund_10y":            "IRLTLT01DEM156N",
+        }
+        MERCATI = {
+            "ftse_mib":    "FTSEMIB.MI",
+            "eurostoxx50": "^STOXX50E",
+            "eurusd":      "EURUSD=X",
+            "brent":       "BZ=F",
+            "vix":         "^VIX",
+        }
+        DATA_INIZIO = "2009-01-01"
+        DATA_FINE   = pd.Timestamp.today().strftime("%Y-%m-%d")
+
+        os.makedirs("data/clean/macro",    exist_ok=True)
+        os.makedirs("data/clean/mercati",  exist_ok=True)
+
+        # Scarica macro
+        macro = {}
+        for nome, codice in INDICATORI.items():
+            try:
+                macro[nome] = fred.get_series(codice, observation_start=DATA_INIZIO, observation_end=DATA_FINE)
+            except Exception:
+                pass
+
+        macro_df = {k: v.to_frame(name=k) for k, v in macro.items()}
+        macro_pulito = pulisci_dizionario(macro_df)
+        macro_resampled = _resample(macro_pulito)
+        for nome, df in macro_resampled.items():
+            df.to_csv(f"data/clean/macro/{nome}.csv")
+
+        # Scarica mercati
+        for nome, ticker in MERCATI.items():
+            try:
+                df = yf.download(ticker, start=DATA_INIZIO, end=DATA_FINE, progress=False)
+                if not df.empty:
+                    close = df["Close"]
+                    if isinstance(close, pd.DataFrame):
+                        close = close.iloc[:, 0]
+                    close.to_frame(name=nome).to_csv(f"data/clean/mercati/{nome}.csv")
+            except Exception:
+                pass
+
+        st.success("✅ Dati scaricati. Caricamento dashboard...")
+        st.rerun()
+
+
+_scarica_se_necessario()
+
 
 @st.cache_data
 def carica_dati_dashboard():
