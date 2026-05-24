@@ -110,78 +110,86 @@ mpl.rcParams.update({
 
 def _scarica_se_necessario():
     """
-    Se data/clean/ non esiste (es. Streamlit Cloud), scarica i dati
-    direttamente da FRED e yFinance prima di caricarli.
-    Usa la FRED_API_KEY dai Secrets di Streamlit o dal file .env locale.
+    Se data/clean/macro/ non esiste o è vuota (es. Streamlit Cloud),
+    scarica i dati direttamente da FRED e yFinance.
     """
-    if not os.path.isdir("data/clean/macro"):
-        st.info("⏳ Prima esecuzione: scaricamento dati in corso (1-2 minuti)...")
-        import sys
-        sys.path.insert(0, ".")
-        from fredapi import Fred
-        import yfinance as yf
-        from utils import pulisci_dizionario, resample_dati as _resample
+    macro_ok = os.path.isdir("data/clean/macro") and len(os.listdir("data/clean/macro")) > 0
+    if macro_ok:
+        return
 
-        api_key = os.getenv("FRED_API_KEY")
-        if not api_key:
-            st.error("FRED_API_KEY non trovata. Aggiungila nei Secrets di Streamlit.")
-            st.stop()
+    st.info("⏳ Prima esecuzione: scaricamento dati da FRED e yFinance (1-2 minuti)...")
 
-        fred = Fred(api_key=api_key)
+    from fredapi import Fred
+    import yfinance as yf
+    from utils import pulisci_dizionario, resample_dati as _resample
 
-        INDICATORI = {
-            "inflazione_eurozona": "CP0000EZ19M086NEST",
-            "inflazione_italia":   "CP0000ITM086NEST",
-            "pil_eurozona":        "CLVMEURSCAB1GQEA19",
-            "pil_italia":          "CLVMNACSCAB1GQIT",
-            "disoccupazione_eurozona": "LRHUTTTTEZM156S",
-            "disoccupazione_italia":   "LRHUTTTTITM156S",
-            "tasso_bce":           "ECBDFR",
-            "m3_eurozona":         "MABMM301EZM189S",
-            "btp_10y":             "IRLTLT01ITM156N",
-            "bund_10y":            "IRLTLT01DEM156N",
-        }
-        MERCATI = {
-            "ftse_mib":    "FTSEMIB.MI",
-            "eurostoxx50": "^STOXX50E",
-            "eurusd":      "EURUSD=X",
-            "brent":       "BZ=F",
-            "vix":         "^VIX",
-        }
-        DATA_INIZIO = "2009-01-01"
-        DATA_FINE   = pd.Timestamp.today().strftime("%Y-%m-%d")
+    api_key = os.getenv("FRED_API_KEY")
+    if not api_key:
+        st.error("FRED_API_KEY non trovata. Aggiungila nei Secrets di Streamlit.")
+        st.stop()
 
-        os.makedirs("data/clean/macro",    exist_ok=True)
-        os.makedirs("data/clean/mercati",  exist_ok=True)
+    fred = Fred(api_key=api_key)
 
-        # Scarica macro
-        macro = {}
-        for nome, codice in INDICATORI.items():
-            try:
-                macro[nome] = fred.get_series(codice, observation_start=DATA_INIZIO, observation_end=DATA_FINE)
-            except Exception:
-                pass
+    INDICATORI = {
+        "inflazione_eurozona":     "CP0000EZ19M086NEST",
+        "inflazione_italia":       "CP0000ITM086NEST",
+        "pil_eurozona":            "CLVMEURSCAB1GQEA19",
+        "pil_italia":              "CLVMNACSCAB1GQIT",
+        "disoccupazione_eurozona": "LRHUTTTTEZM156S",
+        "disoccupazione_italia":   "LRHUTTTTITM156S",
+        "tasso_bce":               "ECBDFR",
+        "m3_eurozona":             "MABMM301EZM189S",
+        "btp_10y":                 "IRLTLT01ITM156N",
+        "bund_10y":                "IRLTLT01DEM156N",
+    }
+    MERCATI = {
+        "ftse_mib":    "FTSEMIB.MI",
+        "eurostoxx50": "^STOXX50E",
+        "eurusd":      "EURUSD=X",
+        "brent":       "BZ=F",
+        "vix":         "^VIX",
+    }
+    DATA_INIZIO = "2009-01-01"
+    DATA_FINE   = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-        macro_df = {k: v.to_frame(name=k) for k, v in macro.items()}
-        macro_pulito = pulisci_dizionario(macro_df)
-        macro_resampled = _resample(macro_pulito)
-        for nome, df in macro_resampled.items():
-            df.to_csv(f"data/clean/macro/{nome}.csv")
+    # Scarica macro
+    macro = {}
+    for nome, codice in INDICATORI.items():
+        try:
+            serie = fred.get_series(codice, observation_start=DATA_INIZIO, observation_end=DATA_FINE)
+            if serie is not None and len(serie) > 0:
+                macro[nome] = serie
+        except Exception as e:
+            st.warning(f"Impossibile scaricare {nome}: {e}")
 
-        # Scarica mercati
-        for nome, ticker in MERCATI.items():
-            try:
-                df = yf.download(ticker, start=DATA_INIZIO, end=DATA_FINE, progress=False)
-                if not df.empty:
-                    close = df["Close"]
-                    if isinstance(close, pd.DataFrame):
-                        close = close.iloc[:, 0]
-                    close.to_frame(name=nome).to_csv(f"data/clean/mercati/{nome}.csv")
-            except Exception:
-                pass
+    if not macro:
+        st.error("Nessun dato macro scaricato. Controlla la FRED_API_KEY.")
+        st.stop()
 
-        st.success("✅ Dati scaricati. Caricamento dashboard...")
-        st.rerun()
+    # Pulisce e ricampiona, poi salva
+    macro_df       = {k: v.to_frame(name=k) for k, v in macro.items()}
+    macro_pulito   = pulisci_dizionario(macro_df)
+    macro_resampled = _resample(macro_pulito)
+
+    os.makedirs("data/clean/macro", exist_ok=True)
+    for nome, df in macro_resampled.items():
+        df.to_csv(f"data/clean/macro/{nome}.csv")
+
+    # Scarica mercati
+    os.makedirs("data/clean/mercati", exist_ok=True)
+    for nome, ticker in MERCATI.items():
+        try:
+            df = yf.download(ticker, start=DATA_INIZIO, end=DATA_FINE, progress=False)
+            if not df.empty:
+                close = df["Close"]
+                if isinstance(close, pd.DataFrame):
+                    close = close.iloc[:, 0]
+                close.to_frame(name=nome).to_csv(f"data/clean/mercati/{nome}.csv")
+        except Exception as e:
+            st.warning(f"Impossibile scaricare {nome}: {e}")
+
+    st.success("✅ Dati scaricati. Riavvio dashboard...")
+    st.rerun()
 
 
 _scarica_se_necessario()
@@ -256,6 +264,14 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 st.sidebar.markdown("---")
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Aggiorna dati"):
+    import shutil
+    if os.path.isdir("data/clean"):
+        shutil.rmtree("data/clean")
+    st.cache_data.clear()
+    st.rerun()
+
 st.sidebar.markdown(
     "<p style='font-size:0.6rem;color:#374151;text-align:center'>"
     "DATI: FRED &middot; YAHOO FINANCE<br>MODELLI: GRADIENT BOOSTING<br>AUTORE: VINCENZO</p>",
@@ -278,9 +294,14 @@ if "Panoramica" in sezione:
     c1, c2, c3, c4 = st.columns(4)
 
     def ultimo(chiave):
-        return dati[chiave].squeeze().dropna().iloc[-1]
+        if chiave not in dati:
+            return float("nan")
+        s = dati[chiave].squeeze().dropna()
+        return s.iloc[-1] if len(s) > 0 else float("nan")
 
     def delta_val(chiave):
+        if chiave not in dati:
+            return 0.0
         s = dati[chiave].squeeze().dropna()
         return float(s.iloc[-1] - s.iloc[-2]) if len(s) > 1 else 0.0
 
